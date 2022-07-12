@@ -174,8 +174,10 @@ int timingRealtime(int ecmcError)
   timestamp[0]='\0';
 
   uint64_t full_nanos = ecGetSendTimeNanos();
-  send.tv_sec=full_nanos/1000000000L;
-  send.tv_nsec=full_nanos-1000000000L*send.tv_sec;
+  
+  send.tv_sec=full_nanos/1000000000LL;
+  send.tv_nsec=full_nanos-1000000000LL*send.tv_sec;
+  send.tv_sec=send.tv_sec+946684800ULL;
   
   for(cmsg=CMSG_FIRSTHDR(&msg);cmsg!=NULL;cmsg=CMSG_NXTHDR(&msg, cmsg)) {            
       if(cmsg->cmsg_level==SOL_SOCKET && cmsg->cmsg_type==type) {
