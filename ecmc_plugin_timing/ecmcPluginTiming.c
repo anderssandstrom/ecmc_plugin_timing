@@ -24,10 +24,11 @@ extern "C" {
 #include <string.h>
 #include <pthread.h>
 #include <unistd.h>
-
+#include <stdint.h>
 
 #include "ecmcPluginDefs.h"
 #include "ecmcPluginClient.h"
+#include "ecmcEthercat.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -51,6 +52,7 @@ extern "C" {
 #include <poll.h>
 #include <linux/if.h>
 
+
 #define RAW_SOCKET 1 // Set to 0 to use an UDP socket, set to 1 to use raw socket
 
 #if RAW_SOCKET
@@ -70,9 +72,9 @@ int initDone = 0;
 int sock;
 int destination_port = 1234;
 struct in_addr sourceIP;
-int usehw = 1;
+int usehw = 0;
 int type=0;
-const char ifname[256] = "eno1\n";
+const char ifname[256] = "eno1";
 
 void die(char* s)
 {
@@ -144,7 +146,7 @@ int timingRealtime(int ecmcError)
 
   fflush(stdout);
   // Obtain the sent packet timestamp.
-  char data[256];
+  char data[1024];
   struct msghdr msg;
   struct iovec entry;
   char ctrlBuf[CMSG_SPACE(sizeof(struct timespec)*3)];
@@ -167,9 +169,14 @@ int timingRealtime(int ecmcError)
   //printf("After wait for data\n");
   // Extract and print ancillary data (SW or HW tx timestamps)
   struct cmsghdr *cmsg = NULL;
-  struct timespec *hw_ts;
+  struct timespec *hw_ts,send;
   char timestamp[35];
   timestamp[0]='\0';
+
+  uint64_t full_nanos = ecGetSendTimeNanos();
+  send.tv_sec=full_nanos/1000000000L;
+  send.tv_nsec=full_nanos-1000000000L*send.tv_sec;
+  
   for(cmsg=CMSG_FIRSTHDR(&msg);cmsg!=NULL;cmsg=CMSG_NXTHDR(&msg, cmsg)) {            
       if(cmsg->cmsg_level==SOL_SOCKET && cmsg->cmsg_type==type) {
           hw_ts=((struct timespec *)CMSG_DATA(cmsg));
@@ -180,6 +187,8 @@ int timingRealtime(int ecmcError)
             timespec2str(&timestamp[0],35, &hw_ts[0]);
             fprintf(stdout,"SW: %lu s, %lu ns (%s)\n",hw_ts[0].tv_sec,hw_ts[0].tv_nsec,timestamp);
           }
+          timespec2str(&timestamp[0],35, &send);
+          fprintf(stdout,"EC: %lu s, %lu ns (%s)\n",send.tv_sec,send.tv_nsec,timestamp);
           //fprintf(stdout,"ts[1] - ???: %lu s, %lu ns\n",hw_ts[1].tv_sec,hw_ts[1].tv_nsec);
       }
   }
@@ -192,11 +201,11 @@ int timingRealtime(int ecmcError)
  **/
 int timingEnterRT(){
 
-  fprintf(stdout,"Program started.\n");
+  fprintf(stdout,"Program started, connecting to interface %s.\n",ifname);
   
   // Create socket
   if ((sock = socket(PF_PACKET,SOCK_RAW,htons(ETH_P_ALL))) < 0) {
-      die("RAW socket()");
+      die("RAW socket()");      
       return 3;
   }
   struct ifreq ifindexreq;
@@ -209,6 +218,7 @@ int timingEnterRT(){
     ifindex=ifindexreq.ifr_ifindex;
   } else {
     die("SIOCGIFINDEX ioctl()");
+    fprintf(stdout,"interface %s.\n",ifname);
     return 4;
   }
   
@@ -236,7 +246,7 @@ int timingEnterRT(){
     memset(&hwtstamp,0,sizeof(hwtstamp));
     memset(&hwconfig,0,sizeof(hwconfig));
     // Set ifr_name and ifr_data (see: man7.org/linux/man-pages/man7/netdevice.7.html)
-    strncpy(hwtstamp.ifr_name,ifname,sizeof(hwtstamp.ifr_name));
+    strncpy(hwtstamp.ifr_name,ifname,IFNAMSIZ);
     hwtstamp.ifr_data=(void *)&hwconfig;
     hwconfig.tx_type=HWTSTAMP_TX_ON;
     hwconfig.rx_filter=HWTSTAMP_FILTER_ALL;
