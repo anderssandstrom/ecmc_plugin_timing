@@ -163,38 +163,49 @@ int timingRealtime(int ecmcError)
   //printf("Wait for data\n");
   //pollErrqueueWait(sock,-1); // -1 = no timeout is set
   //if (recvmsg(sock, &msg, MSG_ERRQUEUE) < 0) {
-  if (recvmsg(sock, &msg, MSG_DONTWAIT) < 0) {
-      //die("recvmsg()");
-  }
-  //printf("After wait for data\n");
-  // Extract and print ancillary data (SW or HW tx timestamps)
   struct cmsghdr *cmsg = NULL;
   struct timespec *hw_ts,send;
   char timestamp[35];
   timestamp[0]='\0';
 
   uint64_t full_nanos = ecGetSendTimeNanos();
-  
+  long oldnanos=0;
+
   send.tv_sec=full_nanos/1000000000LL;
   send.tv_nsec=full_nanos-1000000000LL*send.tv_sec;
   send.tv_sec=send.tv_sec+946684800ULL;
+  timespec2str(&timestamp[0],35, &send);
+
+  fprintf(stdout,"EC: %lu s, %lu ns (%s)\n",send.tv_sec,send.tv_nsec,timestamp);
+  int i=0;
+  for(i=0;i<10;i++) {
+  if (recvmsg(sock, &msg, MSG_DONTWAIT) < 0) {
+      //die("recvmsg()");
+  }
+  //printf("After wait for data\n");
+  // Extract and print ancillary data (SW or HW tx timestamps)
   
   for(cmsg=CMSG_FIRSTHDR(&msg);cmsg!=NULL;cmsg=CMSG_NXTHDR(&msg, cmsg)) {            
       if(cmsg->cmsg_level==SOL_SOCKET && cmsg->cmsg_type==type) {
           hw_ts=((struct timespec *)CMSG_DATA(cmsg));
           if(usehw) {
-            timespec2str(&timestamp[0],35, &hw_ts[2]);
-            fprintf(stdout,"HW: %lu s, %lu ns (%s)\n",hw_ts[2].tv_sec,hw_ts[2].tv_nsec,timestamp);
+            if(oldnanos != hw_ts[2].tv_nsec) {
+              timespec2str(&timestamp[0],35, &hw_ts[2]);              
+              fprintf(stdout,"HW: %lu s, %lu ns (%s)\n",hw_ts[2].tv_sec,hw_ts[2].tv_nsec,timestamp);
+            }
+            oldnanos = hw_ts[2].tv_nsec;
           } else {
-            timespec2str(&timestamp[0],35, &hw_ts[0]);
-            fprintf(stdout,"SW: %lu s, %lu ns (%s)\n",hw_ts[0].tv_sec,hw_ts[0].tv_nsec,timestamp);
+            if(oldnanos != hw_ts[0].tv_nsec) {
+              timespec2str(&timestamp[0],35, &hw_ts[0]);
+              fprintf(stdout,"SW: %lu s, %lu ns (%s)\n",hw_ts[0].tv_sec,hw_ts[0].tv_nsec,timestamp);
+            }
+            oldnanos = hw_ts[0].tv_nsec;
           }
-          timespec2str(&timestamp[0],35, &send);
-          fprintf(stdout,"EC: %lu s, %lu ns (%s)\n",send.tv_sec,send.tv_nsec,timestamp);
           //fprintf(stdout,"ts[1] - ???: %lu s, %lu ns\n",hw_ts[1].tv_sec,hw_ts[1].tv_nsec);
       }
   }
 
+  }
   return 0;
 }
 
